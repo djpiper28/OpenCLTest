@@ -10,6 +10,7 @@
 #include <errno.h>
 #include <pthread.h>
 #include <unistd.h>
+#include <math.h>
 
 #include <CL/cl.h>
 
@@ -57,76 +58,44 @@ cl_int *intArr (char **rows, long width, long height, long bytes_pp) {
     return data;
 }
 
-void solveMaze (struct PNG *maze) {   
-    // init
-    /* OpenCL structures */
-    cl_device_id device;
-    cl_context context;
-    cl_program program;
-    cl_kernel kernel, reset_kernel;
-    cl_command_queue queue;
+int solveMazeSegment (long width,
+                      long height,
+                      long startX, 
+                      long startY,
+                      long endX, 
+                      long endY, 
+                      cl_mem dbuffrows,
+                      cl_mem dans,
+                      cl_device_id device, 
+                      cl_context context, 
+                      cl_program program,
+                      cl_kernel kernel, 
+                      cl_kernel reset_kernel, 
+                      cl_command_queue queue) {       
     cl_int err;
     size_t local_size, size_2, size_3, global_size;
+        
+    // Number of work items in each local work group
+    local_size = endX - startX;
+    // Number of total work items - localSize must be devisor
+    global_size = (endY - startY) * local_size;
     
-    // Device input and output buffers
-    cl_mem dbuffrows, dans;
+    size_2 = size_3 = 1;
     
-    /* Create device and context */
-    device = create_device();
-    context = clCreateContext(NULL, 1, &device, NULL, NULL, &err);
-    
-    /* Build program */
-    program = build_program(context, device, PROGRAM_FILE);
-    
-    /* Create a command queue */
-    queue = clCreateCommandQueue(context, device, 0, &err);
-    
-    //changed buffer    
-    dans = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(int), NULL, NULL);  
-    int tmp[] = {0};
-    err = clEnqueueWriteBuffer(queue, dans, CL_TRUE, 0,
-                               sizeof(int), tmp, 0, NULL, NULL);
-    if (err != CL_SUCCESS)
-        printf("Error code :%x while writing changed buffer\n", err);
-    
-    //data buffer
-    int len = sizeof(cl_int) * maze->width * maze->height;
-    cl_int *data = intArr((char **) maze->rows, maze->width, maze->height, maze->bytes_pp);
-    dbuffrows = clCreateBuffer(context, CL_MEM_READ_WRITE, 
-                               len, NULL, NULL);
-    err = clEnqueueWriteBuffer(queue, dbuffrows, CL_TRUE, 0,
-                               len, data, 0, NULL, NULL);
-    
-    if (err != CL_SUCCESS)
-        printf("Error code :%x while writing image buffer\n", err);
-    
-    //make kernel
-    kernel = clCreateKernel(program, KERNEL_FUNC, &err);
-    
-    //kernel args    
-    long width = (long) maze->width,
-         height = (long) maze->height;
-         
-    err = clSetKernelArg(kernel, 0, sizeof(long), &width); 
-    err |= clSetKernelArg(kernel, 1, sizeof(long), &height); 
-    err |= clSetKernelArg(kernel, 2, sizeof(cl_mem), &dbuffrows);
-    err |= clSetKernelArg(kernel, 3, sizeof(cl_mem), &dans);
+    //kernel args             
+    err  = clSetKernelArg(kernel, 0, sizeof(long), &width); 
+    err  = clSetKernelArg(kernel, 1, sizeof(long), &local_size); 
+    err |= clSetKernelArg(kernel, 2, sizeof(long), &startX);
+    err |= clSetKernelArg(kernel, 3, sizeof(long), &startY); 
+    err |= clSetKernelArg(kernel, 4, sizeof(cl_mem), &dbuffrows);
+    err |= clSetKernelArg(kernel, 5, sizeof(cl_mem), &dans);
     
     if (err != CL_SUCCESS)
         printf("Error code :%x while adding kernel args\n", err);
-    
-    reset_kernel = clCreateKernel(program , RESET_FUNC, &err);
+   
     err = clSetKernelArg(reset_kernel, 0, sizeof(cl_mem), &dans); 
-        
-    // minus two to ignore 1px border
-    // Number of work items in each local work group
-    local_size = maze->width - 2;
-    // Number of total work items - localSize must be devisor
-    global_size = (maze->height - 2) * local_size;
-    
-    size_2 = size_3 = 1;
     //While changed run the kernels    
-    int changed = 1;
+    int changed = 1, i = 0;
     while (changed) {          
         /* Enqueue kernel */
         err = clEnqueueNDRangeKernel(queue, reset_kernel, 1, NULL, &size_2,                        
@@ -154,7 +123,113 @@ void solveMaze (struct PNG *maze) {
         clEnqueueReadBuffer(queue, dans, CL_TRUE, 0, sizeof(int), arr, 0, 
                             NULL, NULL);
         
-        changed = *arr;             
+        changed = *arr;   
+        i++;
+    } 
+    
+    return i;
+}
+
+void solveMaze(struct PNG *maze) {
+    // init
+    /* OpenCL structures */
+    cl_device_id device;
+    cl_context context;
+    cl_program program;
+    cl_kernel kernel, reset_kernel;
+    cl_command_queue queue;
+    cl_int err;
+    
+    int segments = 0;
+    
+    int segSize;
+    if ((maze->width - 2) * (maze->height - 2) > CL_DEVICE_MAX_WORK_GROUP_SIZE) {
+        segSize = floor(sqrt(CL_DEVICE_MAX_WORK_GROUP_SIZE));
+        printf("Splitting into segments of size %dx%d (workgroup size %d)\n", 
+               segSize, segSize, CL_DEVICE_MAX_WORK_GROUP_SIZE);
+        segments = 1;
+    }        
+       
+    // Device input and output buffers
+    cl_mem dans;
+    
+    /* Create device and context */
+    device = create_device();
+    context = clCreateContext(NULL, 1, &device, NULL, NULL, &err);
+    
+    /* Build program */
+    program = build_program(context, device, PROGRAM_FILE);
+    
+    /* Create a command queue */
+    queue = clCreateCommandQueue(context, device, 0, &err);
+    
+    //changed buffer    
+    dans = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(int), NULL, NULL);  
+    int tmp[] = {0};
+    err = clEnqueueWriteBuffer(queue, dans, CL_TRUE, 0,
+                               sizeof(int), tmp, 0, NULL, NULL);
+    if (err != CL_SUCCESS)
+        printf("Error code :%x while writing changed buffer\n", err);
+    
+    //data buffer
+    int len = sizeof(cl_int) * maze->width * maze->height;
+    cl_int *data = intArr((char **) maze->rows, maze->width, maze->height, maze->bytes_pp);
+    cl_mem dbuffrows = clCreateBuffer(context, CL_MEM_READ_WRITE, 
+                               len, NULL, NULL);
+    err = clEnqueueWriteBuffer(queue, dbuffrows, CL_TRUE, 0,
+                               len, data, 0, NULL, NULL);
+    
+    if (err != CL_SUCCESS)
+        printf("Error code :%x while writing image buffer\n", err);    
+            
+    //make kernel
+    kernel = clCreateKernel(program, KERNEL_FUNC, &err);   
+    reset_kernel = clCreateKernel(program , RESET_FUNC, &err);
+    
+    //create and solve segments
+    if (!segments) {
+        solveMazeSegment(maze->width, maze->height, 
+                         1, 1, 
+                         maze->width - 1, maze->height - 1,
+                         dbuffrows,
+                         dans,
+                         device, 
+                         context, 
+                         program,
+                         kernel, 
+                         reset_kernel, 
+                         queue);        
+    } else {
+        int cont = 1;
+        
+        while (cont) {
+            cont = 0;
+            
+            for (int y = 1; y < maze->height - 1; y += segSize) {
+                for (int x = 1; x < maze->width - 1; x += segSize) {
+                    int endX = x + segSize, 
+                        endY = y + segSize;
+                        
+                    //Check segment is correct size
+                    if (endX > maze->width - 1) endX = maze->width - 1;
+                    if (endY > maze->height - 1) endY = maze->height - 1;
+                    
+                    int tmp = solveMazeSegment(maze->width, maze->height, 
+                                               x, y,
+                                               endX, endY,
+                                               dbuffrows,
+                                               dans,
+                                               device, 
+                                               context, 
+                                               program,
+                                               kernel, 
+                                               reset_kernel, 
+                                               queue);
+                    
+                    if (!cont) cont = tmp > 1; 
+                }
+            }
+        }
     }
     
     //get output
@@ -195,13 +270,14 @@ void solveMaze (struct PNG *maze) {
     //Assign new rows
     maze->rows = (png_bytepp) pngRows;
     
+    clReleaseMemObject(dbuffrows);
+        
     /* Deallocate resources */
     clReleaseKernel(kernel);
-    clReleaseMemObject(dbuffrows);
     clReleaseMemObject(dans);
     clReleaseCommandQueue(queue);
     clReleaseProgram(program);
-    clReleaseContext(context);
+    clReleaseContext(context);   
     
     free(data);
 }
