@@ -15,7 +15,7 @@
 
 #include "defs.h"
 
-#define VERSION "v1.0"
+#define VERSION "v1.1"
 #define PROGRAM_FILE "solve_kernel.cl"
 #define KERNEL_FUNC "solve_kernel"
 #define RESET_FUNC "set_changed_to_zero"
@@ -84,8 +84,10 @@ void solveMaze (struct PNG *maze) {
     //changed buffer    
     dans = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(int), NULL, NULL);  
     int tmp[] = {0};
-    err = clEnqueueWriteBuffer(queue, dbuffrows, CL_TRUE, 0,
+    err = clEnqueueWriteBuffer(queue, dans, CL_TRUE, 0,
                                sizeof(int), tmp, 0, NULL, NULL);
+    if (err != CL_SUCCESS)
+        printf("Error code :%x while writing changed buffer\n", err);
     
     //data buffer
     int len = sizeof(cl_int) * maze->width * maze->height;
@@ -95,14 +97,23 @@ void solveMaze (struct PNG *maze) {
     err = clEnqueueWriteBuffer(queue, dbuffrows, CL_TRUE, 0,
                                len, data, 0, NULL, NULL);
     
+    if (err != CL_SUCCESS)
+        printf("Error code :%x while writing image buffer\n", err);
+    
     //make kernel
     kernel = clCreateKernel(program, KERNEL_FUNC, &err);
     
     //kernel args    
-    err = clSetKernelArg(kernel, 0, sizeof(int), &maze->width); 
-    err |= clSetKernelArg(kernel, 1, sizeof(int), &maze->height); 
+    long width = (long) maze->width,
+         height = (long) maze->height;
+         
+    err = clSetKernelArg(kernel, 0, sizeof(long), &width); 
+    err |= clSetKernelArg(kernel, 1, sizeof(long), &height); 
     err |= clSetKernelArg(kernel, 2, sizeof(cl_mem), &dbuffrows);
     err |= clSetKernelArg(kernel, 3, sizeof(cl_mem), &dans);
+    
+    if (err != CL_SUCCESS)
+        printf("Error code :%x while adding kernel args\n", err);
     
     reset_kernel = clCreateKernel(program , RESET_FUNC, &err);
     err = clSetKernelArg(reset_kernel, 0, sizeof(cl_mem), &dans); 
@@ -119,7 +130,10 @@ void solveMaze (struct PNG *maze) {
     while (changed) {          
         /* Enqueue kernel */
         err = clEnqueueNDRangeKernel(queue, reset_kernel, 1, NULL, &size_2,                        
-                                     &size_3, 0, NULL, NULL); 
+                                     &size_3, 0, NULL, NULL);
+        
+        if (err != CL_SUCCESS)
+            printf("Error code :%d while resetting the changed buffer\n", err);
         //wait for reset of array
         clFinish(queue);
         
@@ -127,7 +141,10 @@ void solveMaze (struct PNG *maze) {
         /* Enqueue kernel */
         err = clEnqueueNDRangeKernel(queue, kernel, 1, NULL, &global_size, 
                                      &local_size, 0, NULL, NULL); 
-                
+        
+        if (err != CL_SUCCESS)
+            printf("Error code :%d while running the solve kernel\n", err);     
+        
         /* Wait for the command queue to get serviced before reading 
          * back results */
         clFinish(queue);

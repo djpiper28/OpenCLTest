@@ -1,11 +1,11 @@
-__kernel void solve_kernel(int width,
-                           int height,
+__kernel void solve_kernel(long width,
+                           long height,
                            __global int *rows,
                            __global int *changed) {        
     // minus two then f or g(x) then plus oneto ignore 1px border
-    __private size_t global_idx = get_global_id(0);
-    __private unsigned int x = (global_idx % (width - 2)) + 1;
-    __private unsigned int y = (global_idx / (width - 2)) + 1;
+    __private long global_idx = (long) get_global_id(0);
+    __private long x = (global_idx % (width - 2)) + 1;
+    __private long y = (global_idx / (width - 2)) + 1;
         
     int this = rows[y * width + x];
     if (this == 0)
