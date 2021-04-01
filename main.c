@@ -41,6 +41,31 @@ struct PNG {
     int bytes_pp;
 };
 
+void writePNG (FILE *outputFile, struct PNG png) {  
+    
+    png_structp png_ptr = NULL;
+    png_infop info_ptr = NULL;
+    
+    
+    png_ptr = png_create_write_struct (PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);    
+    info_ptr = png_create_info_struct (png_ptr);
+    
+    png_set_IHDR (png_ptr,
+                  info_ptr,
+                  png.width,
+                  png.height,
+                  png.bit_depth,
+                  png.color_type,
+                  png.interlace_method,
+                  png.compression_method,
+                  png.filter_method);    
+    
+    png_init_io (png_ptr, outputFile);
+    png_set_rows (png_ptr, info_ptr, png.rows);
+    png_write_png (png_ptr, info_ptr, PNG_TRANSFORM_IDENTITY, NULL);
+    png_destroy_write_struct (&png_ptr, &info_ptr);
+}
+
 //rgb is inverted but who cares
 cl_int *intArr (char **rows, long width, long height, long bytes_pp) {
     cl_int *data = (int *) malloc(sizeof(cl_int) * width * height);
@@ -185,6 +210,14 @@ void solveMaze(struct PNG *maze) {
     //make kernel
     kernel = clCreateKernel(program, KERNEL_FUNC, &err);   
     reset_kernel = clCreateKernel(program , RESET_FUNC, &err);
+        
+    char **pngRows;
+    
+    //Free old rows
+    for (int y = 0; y < maze->height; y++) {
+        png_free (maze->png_ptr, maze->rows[y]);
+    }
+    png_free (maze->png_ptr, maze->rows);
     
     //create and solve segments
     if (!segments) {
@@ -200,6 +233,7 @@ void solveMaze(struct PNG *maze) {
                          reset_kernel, 
                          queue);        
     } else {
+        int i = 0;
         int cont = 1;
         
         while (cont) {
@@ -228,45 +262,56 @@ void solveMaze(struct PNG *maze) {
                     
                     if (!cont) cont = tmp > 1; 
                 }
-            }
-        }
-    }
-    
-    //get output
-    cl_int *rows = (int *) malloc(len);
-    clEnqueueReadBuffer(queue, dbuffrows, CL_TRUE, 0, len, rows, 0, NULL, NULL);
-    
-    //set png rows (on cpu)
-    char **pngRows = (char **) malloc(sizeof(char *) * maze->height);
-    for (int y = 0; y < maze->height; y++) {
-        char *pngRow = (char *) malloc(sizeof(char) * maze->width * maze->bytes_pp);
+            }    
         
-        for (int x = 0; x < maze->width; x++) {
-            //convert one pixel to n bytes
-            for (int i = 0; i < maze->bytes_pp; i++) {
-                if (x == 0 || x == maze->width - 1 
-                 || y == 0 || y == maze->height - 1) {
-                    //copy from image
-                    pngRow[maze->bytes_pp * x + i] = maze->rows[y]
-                                                    [maze->bytes_pp * x + i];
-                } else {
-                    //read from output
-                    pngRow[maze->bytes_pp * x + i] = (char) (0xFF & 
-                                        (rows[x + y * maze->width] >> 8 * i));  
-                    
+            //get output
+            cl_int *rows = (int *) malloc(len);
+            clEnqueueReadBuffer(queue, dbuffrows, CL_TRUE, 0, len, rows, 0, NULL, NULL);
+            
+            //set png rows (on cpu)
+            pngRows = (char **) malloc(sizeof(char *) * maze->height);
+            if (i > 0)
+                free(maze->rows);
+            
+            for (int y = 0; y < maze->height; y++) {
+                char *pngRow = (char *) malloc(sizeof(char) * maze->width * maze->bytes_pp);
+                
+                for (int x = 0; x < maze->width; x++) {
+                    //convert one pixel to n bytes
+                    for (int i = 0; i < maze->bytes_pp; i++) {
+                        if (x == 0 || x == maze->width - 1 
+                         || y == 0 || y == maze->height - 1) {
+                            //copy from image
+                            pngRow[maze->bytes_pp * x + i] = maze->rows[y]
+                                                            [maze->bytes_pp * x + i];
+                        } else {
+                            //read from output
+                            if (i > 0)                              
+                                free(maze->rows[y]);
+                            
+                            pngRow[maze->bytes_pp * x + i] = (char) (0xFF & 
+                                                (rows[x + y * maze->width] >> 8 * i));  
+                        }
+                    }
                 }
+                
+                pngRows[y] = pngRow;
             }
+            
+            maze->rows = (png_bytepp) pngRows;
+            
+            char *name = (char *) malloc(sizeof(char) * 6969);
+            sprintf(name, "frames/frame%d.png", i);
+            printf("Saving frame %d as %s\n", i, name);
+            FILE *f = fopen(name, "wb+");
+            writePNG(f, *maze);
+            fclose(f);
+            free(name);
+            
+            i++;
         }
+    }
         
-        pngRows[y] = pngRow;
-    }
-    
-    //Free old rows
-    for (int y = 0; y < maze->height; y++) {
-        png_free (maze->png_ptr, maze->rows[y]);
-    }
-    png_free (maze->png_ptr, maze->rows);
-    
     //Assign new rows
     maze->rows = (png_bytepp) pngRows;
     
@@ -307,31 +352,6 @@ struct PNG readPNG(FILE *inputFile) {
     printf("BYTESPP=%d\n", png.bytes_pp);
     
     return png;
-}
-
-void writePNG (FILE *outputFile, struct PNG png) {  
-    
-    png_structp png_ptr = NULL;
-    png_infop info_ptr = NULL;
-    
-    
-    png_ptr = png_create_write_struct (PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);    
-    info_ptr = png_create_info_struct (png_ptr);
-    
-    png_set_IHDR (png_ptr,
-                  info_ptr,
-                  png.width,
-                  png.height,
-                  png.bit_depth,
-                  png.color_type,
-                  png.interlace_method,
-                  png.compression_method,
-                  png.filter_method);    
-    
-    png_init_io (png_ptr, outputFile);
-    png_set_rows (png_ptr, info_ptr, png.rows);
-    png_write_png (png_ptr, info_ptr, PNG_TRANSFORM_IDENTITY, NULL);
-    png_destroy_write_struct (&png_ptr, &info_ptr);
 }
 
 int solve (char *input, char *output) {
