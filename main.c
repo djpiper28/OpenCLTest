@@ -71,7 +71,7 @@ int solveMazeSegment (long width,
                       cl_program program,
                       cl_kernel kernel, 
                       cl_kernel reset_kernel, 
-                      cl_command_queue queue) {       
+                      cl_command_queue queue) {
     cl_int err;
     size_t local_size, size_2, size_3, global_size;
         
@@ -98,7 +98,7 @@ int solveMazeSegment (long width,
     int changed = 1, i = 0;
     while (changed) {     
         /* Enqueue kernel */
-        err = clEnqueueNDRangeKernel(queue, reset_kernel, 1, NULL, &size_2,                        
+        err = clEnqueueNDRangeKernel(queue, reset_kernel, 1, NULL, &size_2,
                                      &size_3, 0, NULL, NULL);
         
         if (err != CL_SUCCESS)
@@ -214,15 +214,17 @@ void solveMaze(struct PNG *maze) {
                     //if (endX > maze->width - 1) endX = maze->width - 1;
                     //if (endY > maze->height - 1) endY = maze->height - 1;
                     
+                    //branchless min
                     int a = endX > (maze->width - 1);
                     endX = a * (maze->width - 1) +
                           !a * endX;
-                          
+                    
+                    //branchless min
                     int b = endY > (maze->height - 1);
                     endY = b * (maze->height - 1) +
                           !b * endY;
                     
-                    int tmp = solveMazeSegment(maze->width, maze->height, 
+                    int iterations = solveMazeSegment(maze->width, maze->height, 
                                                x, y,
                                                endX, endY,
                                                dbuffrows,
@@ -234,7 +236,7 @@ void solveMaze(struct PNG *maze) {
                                                reset_kernel, 
                                                queue);
                     
-                    cont = tmp > 1; 
+                    if (iterations > 1) cont = 1; 
                 }
             }
         }

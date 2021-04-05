@@ -33,8 +33,7 @@ __kernel void solve_kernel(long width,
         FN
         FN
         FN
-        FN
-    
+        FN    
     }
 }
 
