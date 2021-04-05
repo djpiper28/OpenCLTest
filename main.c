@@ -16,7 +16,7 @@
 
 #include "defs.h"
 
-#define VERSION "v1.1"
+#define VERSION "v1.2"
 #define PROGRAM_FILE "solve_kernel.cl"
 #define KERNEL_FUNC "solve_kernel"
 #define RESET_FUNC "set_changed_to_zero"
@@ -96,7 +96,7 @@ int solveMazeSegment (long width,
     err = clSetKernelArg(reset_kernel, 0, sizeof(cl_mem), &dans); 
     //While changed run the kernels    
     int changed = 1, i = 0;
-    while (changed) {          
+    while (changed) {     
         /* Enqueue kernel */
         err = clEnqueueNDRangeKernel(queue, reset_kernel, 1, NULL, &size_2,                        
                                      &size_3, 0, NULL, NULL);
@@ -104,8 +104,7 @@ int solveMazeSegment (long width,
         if (err != CL_SUCCESS)
             printf("Error code :%d while resetting the changed buffer\n", err);
         //wait for reset of array
-        clFinish(queue);
-        
+        clFinish(queue);           
         
         /* Enqueue kernel */
         err = clEnqueueNDRangeKernel(queue, kernel, 1, NULL, &global_size, 
@@ -115,13 +114,14 @@ int solveMazeSegment (long width,
             printf("Error code :%d while running the solve kernel\n", err);     
         
         /* Wait for the command queue to get serviced before reading 
-         * back results */
+         * back results */    
         clFinish(queue);
          
         int arr[1];
         /* Read the kernel's output */
         clEnqueueReadBuffer(queue, dans, CL_TRUE, 0, sizeof(int), arr, 0, 
                             NULL, NULL);
+        clFinish(queue);
         
         changed = *arr;   
         i++;
@@ -211,8 +211,16 @@ void solveMaze(struct PNG *maze) {
                         endY = y + segSize;
                         
                     //Check segment is correct size
-                    if (endX > maze->width - 1) endX = maze->width - 1;
-                    if (endY > maze->height - 1) endY = maze->height - 1;
+                    //if (endX > maze->width - 1) endX = maze->width - 1;
+                    //if (endY > maze->height - 1) endY = maze->height - 1;
+                    
+                    int a = endX > (maze->width - 1);
+                    endX = a * (maze->width - 1) +
+                          !a * endX;
+                          
+                    int b = endY > (maze->height - 1);
+                    endY = b * (maze->height - 1) +
+                          !b * endY;
                     
                     int tmp = solveMazeSegment(maze->width, maze->height, 
                                                x, y,
@@ -226,7 +234,7 @@ void solveMaze(struct PNG *maze) {
                                                reset_kernel, 
                                                queue);
                     
-                    if (!cont) cont = tmp > 1; 
+                    cont = tmp > 1; 
                 }
             }
         }
