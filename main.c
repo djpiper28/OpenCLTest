@@ -44,13 +44,18 @@ struct PNG {
 //rgb is inverted but who cares
 cl_int *intArr (char **rows, long width, long height, long bytes_pp) {
     cl_int *data = (int *) malloc(sizeof(cl_int) * width * height);
+    long start = 0;
+    if (bytes_pp > 3) {
+        start = bytes_pp - 3;
+    }
     
     for (long y = 0; y < height; y++) {
         for (long x = 0; x < width; x++) {
             data[x + y * width] = 0;
             
-            for (long i = 0; i < bytes_pp; i++) {
-                data[x + y * width] |= rows[y][bytes_pp * x + i] << 8 * i; 
+            for (long i = start; i < bytes_pp; i++) {
+                data[x + y * width] |= rows[y][bytes_pp * x + (i - start)] 
+                                    << 8 * (i - start); 
             }            
         }    
     }
